@@ -3,6 +3,8 @@
 
 import json
 import os
+import sys
+from pathlib import Path
 from tqdm import tqdm
 from symbolic_solvers.z3_solver.sat_problem_solver import LSAT_Z3_Program
 from symbolic_solvers.fol_solver.prover9_solver import FOL_Prover9_Program
@@ -11,14 +13,20 @@ import random
 from backup_answer_generation import Backup_Answer_Generator
 from utils import OpenAIModel
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from dataset_utils import canonicalize_dataset_name
+
 class SelfRefinementEngine:
     def __init__(self, args, current_round):
         self.args = args
         self.split = args.split
         self.model_name = args.model_name
-        self.dataset_name = args.dataset_name
+        self.dataset_name = canonicalize_dataset_name(args.dataset_name)
         self.backup_strategy = args.backup_strategy
-        self.openai_api = OpenAIModel(args.api_key, 'gpt-4', args.stop_words, args.max_new_tokens)
+        self.openai_api = OpenAIModel(args.api_key, 'gpt-4', args.stop_words, args.max_new_tokens, api_base=args.api_base_url)
         self.current_round = current_round
 
         self.logic_programs = self.load_logic_programs()
@@ -84,7 +92,12 @@ class SelfRefinementEngine:
                 if not error_message == 'No Output': # this is not execution error, but parsing error
                     # perform self-correction based on the error message
                     full_prompt = self.load_prompt(logic_program, error_message)
-                    revised_program = self.openai_api.generate(full_prompt).strip()
+                    revised_program = self.openai_api.generate(full_prompt)
+                    if revised_program is None:
+                        print(f"[SelfRefine] API error while refining example {example['id']}, keeping original program.")
+                        revised_program = logic_program
+                    else:
+                        revised_program = revised_program.strip()
                     programs = [revised_program]
                     output = {'id': example['id'], 
                             'context': example['context'],
@@ -98,7 +111,12 @@ class SelfRefinementEngine:
             elif status == 'parsing error':
                 # perform self-correction based on the error message
                 full_prompt = self.load_prompt(logic_program, 'Parsing Error')
-                revised_program = self.openai_api.generate(full_prompt).strip()
+                revised_program = self.openai_api.generate(full_prompt)
+                if revised_program is None:
+                    print(f"[SelfRefine] API error while refining example {example['id']}, keeping original program.")
+                    revised_program = logic_program
+                else:
+                    revised_program = revised_program.strip()
                 programs = [revised_program]
                 output = {'id': example['id'], 
                         'context': example['context'],
@@ -131,6 +149,7 @@ def parse_args():
     parser.add_argument('--api_key', type=str)
     parser.add_argument('--stop_words', type=str, default='------')
     parser.add_argument('--max_new_tokens', type=int, default=1024)
+    parser.add_argument('--api_base_url', type=str, default=None)
     args = parser.parse_args()
     return args
 

@@ -1,0 +1,38 @@
+给定一段中文逻辑题的背景“Problem”以及一个多选题“Question/Choices”，请使用与示例相同的格式把问题转换为基于 Z3 的英文逻辑程序，逻辑程序由三部分组成：Declarations、Constraints 和 Options。
+------
+Problem:
+某科研小组共有三位研究员：甲、乙、丙。每天选择其中一人负责早晨例会，另一人负责下午例会，且同一天不能同一人负责两场例会。已知：(1) 甲至少负责一场例会；(2) 乙如果不负责早晨例会，就必须负责下午例会；(3) 丙只有在甲负责早晨例会时才负责下午例会。
+Question:
+根据上述条件，下列哪项一定为真？
+Choices:
+(A) 甲至少负责两场下午例会。
+(B) 乙至少负责一场早晨例会。
+(C) 丙至多负责一场下午例会。
+(D) 甲和乙不会同时负责同一天的例会。
+###
+# Declarations
+people = EnumSort([jia, yi, bing])
+slots = EnumSort([morning, afternoon])
+days = EnumSort([day1, day2])
+lead = Function([days, slots] -> [people])
+
+# Constraints
+ForAll([d:days], lead(d, morning) != lead(d, afternoon)) ::: 同一天两场例会由不同的人负责
+Exists([d:days, s:slots], lead(d, s) == jia) ::: 甲至少负责一场
+ForAll([d:days], Implies(lead(d, morning) != yi, lead(d, afternoon) == yi)) ::: 乙如果不负责早晨例会，就必须负责下午例会
+ForAll([d:days], Implies(lead(d, afternoon) == bing, lead(d, morning) == jia)) ::: 丙只有在甲负责早晨例会时才负责下午例会
+
+# Options
+Question ::: 根据上述条件，下列哪项一定为真？
+is_valid(Count([d:days], lead(d, afternoon) == jia) >= 2) ::: (A)
+is_valid(Exists([d:days], lead(d, morning) == yi)) ::: (B)
+is_valid(Count([d:days], lead(d, afternoon) == bing) <= 1) ::: (C)
+is_valid(ForAll([d:days], lead(d, morning) != yi)) ::: (D)
+------
+Problem:
+[[PROBLEM]]
+Question:
+[[QUESTION]]
+Choices:
+[[CHOICES]]
+###

@@ -4,7 +4,6 @@ import sys
 from pathlib import Path
 from tqdm import tqdm
 from symbolic_solvers.fol_solver.prover9_solver import FOL_Prover9_Program
-from symbolic_solvers.pyke_solver.pyke_solver import Pyke_Program
 from symbolic_solvers.csp_solver.csp_solver import CSP_Program
 from symbolic_solvers.z3_solver.sat_problem_solver import LSAT_Z3_Program
 import argparse
@@ -17,6 +16,13 @@ if str(ROOT_DIR) not in sys.path:
 
 from dataset_utils import canonicalize_dataset_name
 
+# PyKE is used only for ProntoQA / ProofWriter; it may be unavailable on
+# modern Python versions due to its dependency on the deprecated `imp` module.
+try:
+    from symbolic_solvers.pyke_solver.pyke_solver import Pyke_Program  # type: ignore
+except ModuleNotFoundError:
+    Pyke_Program = None
+
 class LogicInferenceEngine:
     def __init__(self, args):
         self.args = args
@@ -25,14 +31,26 @@ class LogicInferenceEngine:
         self.model_name = args.model_name
         self.save_path = args.save_path
         self.backup_strategy = args.backup_strategy
-
         self.dataset = self.load_logic_programs()
-        program_executor_map = {'FOLIO': FOL_Prover9_Program, 
-                                'ProntoQA': Pyke_Program, 
-                                'ProofWriter': Pyke_Program,
-                                'LogicalDeduction': CSP_Program,
-                                'AR-LSAT': LSAT_Z3_Program,
-                                'chinese-logicqa': LSAT_Z3_Program}
+
+        program_executor_map = {
+            'FOLIO': FOL_Prover9_Program,
+            'LogicalDeduction': CSP_Program,
+            'AR-LSAT': LSAT_Z3_Program,
+            'chinese-logicqa': LSAT_Z3_Program,
+        }
+        if Pyke_Program is not None:
+            program_executor_map.update({
+                'ProntoQA': Pyke_Program,
+                'ProofWriter': Pyke_Program,
+            })
+        elif self.dataset_name in ('ProntoQA', 'ProofWriter'):
+            raise RuntimeError(
+                f"PyKE solver is not available for dataset {self.dataset_name}; "
+                "it depends on the deprecated 'imp' module which is removed in "
+                "newer Python versions."
+            )
+
         self.program_executor = program_executor_map[self.dataset_name]
         self.backup_generator = Backup_Answer_Generator(self.dataset_name, self.backup_strategy, self.args.backup_LLM_result_path)
 

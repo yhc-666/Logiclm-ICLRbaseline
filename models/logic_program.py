@@ -1,28 +1,37 @@
 # generate facts and rules based on the problem description
 
-import json
 import os
+import sys
+import json
+from pathlib import Path
 from tqdm import tqdm
 from collections import OrderedDict
 from typing import Dict, List, Tuple
 from utils import OpenAIModel
 import argparse
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from dataset_utils import load_dataset, canonicalize_dataset_name
+
 class LogicProgramGenerator:
     def __init__(self, args):
         self.args = args
         self.data_path = args.data_path
-        self.dataset_name = args.dataset_name
+        self.dataset_name = canonicalize_dataset_name(args.dataset_name)
         self.split = args.split
         self.model_name = args.model_name
         self.save_path = args.save_path
 
-        self.openai_api = OpenAIModel(args.api_key, args.model_name, args.stop_words, args.max_new_tokens)
+        self.openai_api = OpenAIModel(args.api_key, args.model_name, args.stop_words, args.max_new_tokens, api_base=args.api_base_url)
         self.prompt_creator = {'FOLIO': self.prompt_folio,
                                'ProntoQA': self.prompt_prontoqa,
                                'ProofWriter': self.prompt_proofwriter,
                                'LogicalDeduction': self.prompt_logicaldeduction, 
-                               'AR-LSAT': self.prompt_arlsat}
+                               'AR-LSAT': self.prompt_arlsat,
+                               'chinese-logicqa': self.prompt_chinese_logicqa}
         self.load_prompt_templates()
     
     def load_prompt_templates(self):
@@ -42,6 +51,14 @@ class LogicProgramGenerator:
         problem = test_data['context']
         question = test_data['question'].strip()
         choices_str = '\n'.join([f'({choice.strip()}' for choice in test_data['options']]).strip()
+        full_prompt = self.prompt_template.replace('[[PROBLEM]]', problem).replace('[[QUESTION]]', question)
+        full_prompt = full_prompt.replace('[[CHOICES]]', choices_str)
+        return full_prompt
+
+    def prompt_chinese_logicqa(self, test_data):
+        problem = test_data['context']
+        question = test_data['question'].strip()
+        choices_str = '\n'.join([choice.strip() for choice in test_data['options']]).strip()
         full_prompt = self.prompt_template.replace('[[PROBLEM]]', problem).replace('[[QUESTION]]', question)
         full_prompt = full_prompt.replace('[[CHOICES]]', choices_str)
         return full_prompt
@@ -67,9 +84,17 @@ class LogicProgramGenerator:
         return full_prompt
 
     def load_raw_dataset(self, split):
-        with open(os.path.join(self.data_path, self.dataset_name, f'{split}.json')) as f:
-            raw_dataset = json.load(f)
-        return raw_dataset
+        return load_dataset(self.dataset_name, self.data_path, split)
+
+    def save_outputs(self, outputs):
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)
+        output_path = os.path.join(
+            self.save_path,
+            f'{self.dataset_name}_{self.split}_{self.model_name}.json',
+        )
+        with open(output_path, 'w', encoding='utf-8') as f:
+            json.dump(outputs, f, indent=2, ensure_ascii=False)
 
     def logic_program_generation(self):
         # load raw dataset
@@ -82,8 +107,12 @@ class LogicProgramGenerator:
             try:
                 full_prompt = self.prompt_creator[self.dataset_name](example)
                 output = self.openai_api.generate(full_prompt)
+                if output is None:
+                    print(f"[LogicProgram] API error on example {example['id']}, storing empty program.")
+                    programs = ['']
+                else:
+                    programs = [output]
                 # print(full_prompt)
-                programs = [output]
 
                 # create output
                 output = {'id': example['id'], 
@@ -96,9 +125,8 @@ class LogicProgramGenerator:
             except:
                 print('Error in generating logic programs for example: ', example['id'])
 
-        # save outputs        
-        with open(os.path.join(self.save_path, f'{self.dataset_name}_{self.split}_{self.model_name}.json'), 'w') as f:
-            json.dump(outputs, f, indent=2, ensure_ascii=False)
+        # save outputs
+        self.save_outputs(outputs)
 
     '''
     Updated version of logic_program_generation; speed up the generation process by batching
@@ -118,7 +146,11 @@ class LogicProgramGenerator:
                 batch_outputs = self.openai_api.batch_generate(full_prompts)
                 # create output
                 for sample, output in zip(chunk, batch_outputs):
-                    programs = [output]
+                    if output is None:
+                        print(f"[LogicProgram] API error on example {sample['id']}, storing empty program.")
+                        programs = ['']
+                    else:
+                        programs = [output]
                     output = {'id': sample['id'], 
                             'context': sample['context'],
                             'question': sample['question'], 
@@ -131,7 +163,11 @@ class LogicProgramGenerator:
                 for sample, full_prompt in zip(chunk, full_prompts):
                     try:
                         output = self.openai_api.generate(full_prompt)
-                        programs = [output]
+                        if output is None:
+                            print(f"[LogicProgram] API error on example {sample['id']}, storing empty program.")
+                            programs = ['']
+                        else:
+                            programs = [output]
                         output = {'id': sample['id'], 
                                 'context': sample['context'],
                                 'question': sample['question'], 
@@ -142,16 +178,13 @@ class LogicProgramGenerator:
                     except:
                         print('Error in generating logic programs for example: ', sample['id'])
 
-        # remove examples with duplicate ids from the result
+            # incrementally flush current outputs to disk
+            self.save_outputs(outputs)
+
+        # remove examples with duplicate ids from the result and save once more
         outputs = list({output['id']: output for output in outputs}.values())
         print(f"Generated {len(outputs)} examples.")
-        
-        # save outputs
-        if not os.path.exists(self.save_path):
-            os.makedirs(self.save_path)
-        
-        with open(os.path.join(self.save_path, f'{self.dataset_name}_{self.split}_{self.model_name}.json'), 'w') as f:
-            json.dump(outputs, f, indent=2, ensure_ascii=False)
+        self.save_outputs(outputs)
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -163,6 +196,7 @@ def parse_args():
     parser.add_argument('--model_name', type=str, default='text-davinci-003')
     parser.add_argument('--stop_words', type=str, default='------')
     parser.add_argument('--max_new_tokens', type=int, default=1024)
+    parser.add_argument('--api_base_url', type=str, default=None)
     args = parser.parse_args()
     return args
 

@@ -1,7 +1,15 @@
 import re
 import json
 import os
+import sys
+from pathlib import Path
 import argparse
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from dataset_utils import canonicalize_dataset_name
 
 # these functions are heavily influenced by the HF squad_metrics.py script
 def normalize_text(s):
@@ -114,7 +122,8 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+    dataset_name = canonicalize_dataset_name(args.dataset_name)
     result_path = f'./outputs/logic_inference'
-    result_file = os.path.join(result_path, f'{args.dataset_name}_{args.split}_{args.model_name}_backup-{args.backup}.json')
+    result_file = os.path.join(result_path, f'{dataset_name}_{args.split}_{args.model_name}_backup-{args.backup}.json')
     # evaluate_QA(result_file)
     full_evaluation(result_file)
