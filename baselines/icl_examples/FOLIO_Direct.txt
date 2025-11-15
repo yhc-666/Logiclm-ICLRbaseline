@@ -1,4 +1,5 @@
-Given a problem statement as contexts, the task is to answer a logical reasoning question. 
+Given a problem statement as contexts, the task is to answer a logical reasoning question. The format of your response should be:
+The correct option is: a single letter 
 ------
 Context:
 All people who regularly drink coffee are dependent on caffeine. People either regularly drink coffee or joke about being addicted to caffeine. No one who jokes about being addicted to caffeine is unaware that caffeine is a drug. Rina is either a student and unaware that caffeine is a drug, or neither a student nor unaware that caffeine is a drug. If Rina is not a person dependent on caffeine and a student, then Rina is either a person dependent on caffeine and a student, or neither a person dependent on caffeine nor a student.

@@ -1,5 +1,7 @@
 import json
 import os
+import sys
+from pathlib import Path
 from tqdm import tqdm
 from symbolic_solvers.fol_solver.prover9_solver import FOL_Prover9_Program
 from symbolic_solvers.pyke_solver.pyke_solver import Pyke_Program
@@ -9,10 +11,16 @@ import argparse
 import random
 from backup_answer_generation import Backup_Answer_Generator
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from dataset_utils import canonicalize_dataset_name
+
 class LogicInferenceEngine:
     def __init__(self, args):
         self.args = args
-        self.dataset_name = args.dataset_name
+        self.dataset_name = canonicalize_dataset_name(args.dataset_name)
         self.split = args.split
         self.model_name = args.model_name
         self.save_path = args.save_path
@@ -23,7 +31,8 @@ class LogicInferenceEngine:
                                 'ProntoQA': Pyke_Program, 
                                 'ProofWriter': Pyke_Program,
                                 'LogicalDeduction': CSP_Program,
-                                'AR-LSAT': LSAT_Z3_Program}
+                                'AR-LSAT': LSAT_Z3_Program,
+                                'chinese-logicqa': LSAT_Z3_Program}
         self.program_executor = program_executor_map[self.dataset_name]
         self.backup_generator = Backup_Answer_Generator(self.dataset_name, self.backup_strategy, self.args.backup_LLM_result_path)
 

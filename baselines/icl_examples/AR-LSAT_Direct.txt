@@ -1,4 +1,5 @@
-Given a problem statement as contexts, the task is to answer a logical reasoning question. 
+Given a problem statement as contexts, the task is to answer a logical reasoning question. The format of your response should be:
+The correct option is: a single letter 
 ------
 Context:
 During a single week, from Monday through Friday, tours will be conducted of a company's three divisions\u2014Operations, Production, and Sales. Exactly five tours will be conducted that week, one each day. The schedule of tours for the week must conform to the following restrictions: Each division is toured at least once. The Operations division is not toured on Monday. The Production division is not toured on Wednesday. The Sales division is toured on two consecutive days, and on no other days. If the Operations division is toured on Thursday, then the Production division is toured on Friday.

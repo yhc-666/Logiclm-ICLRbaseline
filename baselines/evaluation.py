@@ -1,9 +1,17 @@
 import re
 import json
+import sys
+from pathlib import Path
 from tqdm import tqdm
 import random
 import os
 import argparse
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from dataset_utils import canonicalize_dataset_name
 
 def extract_number(string):
     # Remove all characters except digits, decimal point and negative sign
@@ -126,5 +134,6 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    result_file = os.path.join(args.result_path, f'{args.mode}_{args.dataset_name}_{args.split}_{args.model_name}.json')
+    dataset_name = canonicalize_dataset_name(args.dataset_name)
+    result_file = os.path.join(args.result_path, f'{args.mode}_{dataset_name}_{args.split}_{args.model_name}.json')
     evaluate_QA(result_file)

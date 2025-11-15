@@ -1,4 +1,5 @@
-Given a problem statement as contexts, the task is to answer a logical reasoning question. 
+Given a problem statement as contexts, the task is to answer a logical reasoning question. The format of your response should be:
+The correct option is: a single letter 
 ------
 Context:
 The following paragraphs each describe a set of seven objects arranged in a fixed order. The statements are logically consistent within each paragraph.\n\nIn a golf tournament, there were seven golfers: Ana, Eve, Ada, Dan, Rob, Amy, and Joe. Dan finished third. Ana finished above Ada. Amy finished last. Dan finished below Rob. Eve finished below Ada. Rob finished below Joe.

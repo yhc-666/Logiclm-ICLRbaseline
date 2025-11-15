@@ -1,23 +1,31 @@
 import json
 import os
+import sys
+from pathlib import Path
 from tqdm import tqdm
 from collections import OrderedDict
 from typing import Dict, List, Tuple
 from utils import OpenAIModel
 import argparse
 
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
+
+from dataset_utils import load_dataset, canonicalize_dataset_name
+
 class GPT3_Reasoning_Graph_Baseline:
     def __init__(self, args):
         self.args = args
         self.data_path = args.data_path
-        self.dataset_name = args.dataset_name
+        self.dataset_name = canonicalize_dataset_name(args.dataset_name)
         self.split = args.split
         self.model_name = args.model_name
         self.save_path = args.save_path
         self.demonstration_path = args.demonstration_path
         self.mode = args.mode
 
-        self.openai_api = OpenAIModel(args.api_key, args.model_name, args.stop_words, args.max_new_tokens)
+        self.openai_api = OpenAIModel(args.api_key, args.model_name, args.stop_words, args.max_new_tokens, api_base=args.api_base_url)
         self.prompt_creator = self.prompt_LSAT
         self.label_phrase = 'The correct option is:'
     
@@ -37,9 +45,7 @@ class GPT3_Reasoning_Graph_Baseline:
         return in_context_examples
 
     def load_raw_dataset(self, split):
-        with open(os.path.join(self.data_path, self.dataset_name, f'{split}.json')) as f:
-            raw_dataset = json.load(f)
-        return raw_dataset
+        return load_dataset(self.dataset_name, self.data_path, split)
 
     def reasoning_graph_generation(self):
         # load raw dataset
@@ -56,7 +62,11 @@ class GPT3_Reasoning_Graph_Baseline:
             # create prompt
             full_prompt = self.prompt_creator(in_context_examples, example)
             output = self.openai_api.generate(full_prompt)
-            
+            if output is None:
+                print(f"[Baseline] Skipping example {example['id']} due to API error.")
+                outputs.append(self.failed_output(example))
+                continue
+
             # get the answer
             label_phrase = self.label_phrase
             generated_answer = output.split(label_phrase)[-1].strip()
@@ -70,7 +80,9 @@ class GPT3_Reasoning_Graph_Baseline:
                       'predicted_answer': generated_answer}
             outputs.append(output)
 
-        # save outputs        
+        # save outputs
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)
         with open(os.path.join(self.save_path, f'{self.mode}_{self.dataset_name}_{self.split}_{self.model_name}.json'), 'w') as f:
             json.dump(outputs, f, indent=2, ensure_ascii=False)
 
@@ -92,6 +104,10 @@ class GPT3_Reasoning_Graph_Baseline:
                 batch_outputs = self.openai_api.batch_generate(full_prompts)
                 # create output
                 for sample, output in zip(chunk, batch_outputs):
+                    if output is None:
+                        print(f"[Baseline] Skipping example {sample['id']} due to API error.")
+                        outputs.append(self.failed_output(sample))
+                        continue
                     # get the answer
                     dict_output = self.update_answer(sample, output)
                     outputs.append(dict_output)
@@ -100,26 +116,76 @@ class GPT3_Reasoning_Graph_Baseline:
                 for sample, full_prompt in zip(chunk, full_prompts):
                     try:
                         output = self.openai_api.generate(full_prompt)
+                        if output is None:
+                            print(f"[Baseline] Skipping example {sample['id']} due to API error.")
+                            outputs.append(self.failed_output(sample))
+                            continue
                         # get the answer
                         dict_output = self.update_answer(sample, output)
                         outputs.append(dict_output)
                     except:
                         print('Error in generating example: ', sample['id'])
 
-        # save outputs        
+        # save outputs
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)
         with open(os.path.join(self.save_path, f'{self.mode}_{self.dataset_name}_{self.split}_{self.model_name}.json'), 'w') as f:
             json.dump(outputs, f, indent=2, ensure_ascii=False)
     
     def update_answer(self, sample, output):
-        label_phrase = self.label_phrase
-        generated_answer = output.split(label_phrase)[-1].strip()
-        generated_reasoning = output.split(label_phrase)[0].strip()
-        dict_output = {'id': sample['id'], 
-                        'question': sample['question'], 
-                        'answer': sample['answer'], 
-                        'predicted_reasoning': generated_reasoning,
-                        'predicted_answer': generated_answer}
+        text = output.strip() if output is not None else ''
+        reasoning = text
+        answer_segment = text
+
+        # try to split by known markers for the final answer
+        markers = [
+            self.label_phrase,                    # "The correct option is:"
+            'The correct answer is:',
+            '选项：',
+            '选项:',
+        ]
+        for marker in markers:
+            if marker in text:
+                before, after = text.split(marker, 1)
+                reasoning = before.strip()
+                answer_segment = after.strip()
+                break
+
+        # extract a short choice string (e.g., "A", "B", ...)
+        generated_answer = self._extract_choice(answer_segment)
+        if generated_answer is None:
+            # fallback: keep the raw tail as answer
+            generated_answer = answer_segment
+
+        dict_output = {
+            'id': sample['id'],
+            'question': sample['question'],
+            'answer': sample['answer'],
+            'predicted_reasoning': reasoning,
+            'predicted_answer': generated_answer,
+        }
         return dict_output
+
+    def _extract_choice(self, answer_str: str):
+        s = (answer_str or '').strip()
+        if not s:
+            return None
+        # normalize some simple wrappers, e.g. "(D)", "D)", "D."
+        first = s[0].upper()
+        if first in 'ABCDEFGH':
+            return first
+        # also look at the last non-space character
+        last = s[-1].upper()
+        if last in 'ABCDEFGH':
+            return last
+        return None
+
+    def failed_output(self, sample):
+        return {'id': sample['id'],
+                'question': sample['question'],
+                'answer': sample['answer'],
+                'predicted_reasoning': 'API_ERROR',
+                'predicted_answer': ''}
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -133,6 +199,7 @@ def parse_args():
     parser.add_argument('--stop_words', type=str, default='------')
     parser.add_argument('--mode', type=str)
     parser.add_argument('--max_new_tokens', type=int)
+    parser.add_argument('--api_base_url', type=str, default=None)
     args = parser.parse_args()
     return args
 
